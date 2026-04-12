@@ -362,6 +362,24 @@ body{
 var UART='6e400001-b5a3-f393-e0a9-e50e24dcca9e';
 var dev=null,linked=false,buf='';
 var light=0,lux=0,isRec=false,chart=[];
+var recStartLocal=0;     // 手機本地記錄開始計時的時間戳
+var recTimerId=null;     // 本地計時器 ID
+var lastSyncS=0;         // 最後一次收到 micro:bit 的秒數
+
+function startLocalTimer(startS){
+  // 以收到的秒數為起點，往前推算本地開始時間
+  recStartLocal = Date.now() - startS*1000;
+  if(recTimerId) clearInterval(recTimerId);
+  recTimerId = setInterval(function(){
+    if(!isRec) return;
+    var s = Math.floor((Date.now() - recStartLocal)/1000);
+    document.getElementById('recTime').textContent = fmt(s);
+  }, 250);
+}
+
+function stopLocalTimer(){
+  if(recTimerId){ clearInterval(recTimerId); recTimerId=null; }
+}
 
 function go(){if(linked){disc();return}conn()}
 
@@ -415,15 +433,20 @@ function handle(msg){
       showGauge();showStats();addChart(lux);
       if(d.length>=5){
         var rf=Number(d[3]),es=Number(d[4]);
-        if(rf===1&&!isRec){isRec=true;document.getElementById('recDot').classList.add('on');document.getElementById('recLbl').textContent='REC · RECORDING'}
-        if(rf===0&&isRec){isRec=false;document.getElementById('recDot').classList.remove('on');document.getElementById('recLbl').textContent='REC · STOPPED'}
-        if(rf===1)document.getElementById('recTime').textContent=fmt(es);
+        if(rf===1&&!isRec){isRec=true;document.getElementById('recDot').classList.add('on');document.getElementById('recLbl').textContent='REC · RECORDING';startLocalTimer(es);}
+        if(rf===0&&isRec){isRec=false;document.getElementById('recDot').classList.remove('on');document.getElementById('recLbl').textContent='REC · STOPPED';stopLocalTimer();}
+        if(rf===1){
+          // 同步校正：如果本地時間與 micro:bit 差超過 1 秒，調整起點
+          var localS = Math.floor((Date.now()-recStartLocal)/1000);
+          if(Math.abs(localS - es) > 1){ recStartLocal = Date.now() - es*1000; }
+          document.getElementById('recTime').textContent=fmt(es);
+        }
       }
     }
     return;
   }
-  if(msg==='REC:1'){isRec=true;document.getElementById('recDot').classList.add('on');document.getElementById('recLbl').textContent='REC · RECORDING';document.getElementById('recTime').textContent='00:00';return}
-  if(msg==='REC:0'){isRec=false;document.getElementById('recDot').classList.remove('on');document.getElementById('recLbl').textContent='REC · STOPPED';return}
+  if(msg==='REC:1'){isRec=true;document.getElementById('recDot').classList.add('on');document.getElementById('recLbl').textContent='REC · RECORDING';document.getElementById('recTime').textContent='00:00';startLocalTimer(0);return}
+  if(msg==='REC:0'){isRec=false;document.getElementById('recDot').classList.remove('on');document.getElementById('recLbl').textContent='REC · STOPPED';stopLocalTimer();return}
   if(msg.charAt(0)==='R'&&msg.charAt(1)===':'){var d=msg.substring(2).split(',');if(d.length>=5)showResult(Number(d[0]),Number(d[1]),Number(d[2]),Number(d[3]));return}
   if(msg.charAt(0)==='T'&&msg.charAt(1)===':'){document.getElementById('recTime').textContent=msg.substring(2)}
 }
